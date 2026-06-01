@@ -28,6 +28,9 @@ class GerenciadorConfidencialidade:
                 chave = f.read()
             print(f" Chave carregada de: {self.arquivo_chave}")
         else:
+            # PILAR 1: CONFIDENCIALIDADE
+            # Gera chave criptograficamente segura (256 bits). 
+            # A biblioteca cryptography utiliza os.urandom() do sistema operacional como fonte de entropia.
             chave = Fernet.generate_key()
             with open(self.arquivo_chave, "wb") as f:
                 f.write(chave)
@@ -36,14 +39,23 @@ class GerenciadorConfidencialidade:
 
     def criptografar(self, dados: str) -> bytes:
         dados_bytes = dados.encode("utf-8")
+        
+        # Cifra os dados sensíveis utilizando o esquema Fernet.
+        # O Fernet emprega internamente AES-128 no modo CBC (Cipher Block Chaining), 
+        # tornando a criptografia resistente a ataques de análise de padrões.
+        # Também embute automaticamente um HMAC-SHA256 para garantir que o token não seja adulterado.
         dados_cifrados = self.cipher.encrypt(dados_bytes)
         return dados_cifrados
 
     def descriptografar(self, dados_cifrados: bytes) -> str:
+        # Descriptografa os dados e verifica o token.
+        # A operação falhará automaticamente (lançando exceção) se a chave for inválida
+        # ou se o token (HMAC) tiver sido modificado após a cifragem.
         dados_bytes = self.cipher.decrypt(dados_cifrados)
         return dados_bytes.decode("utf-8")
 
     def criptografar_arquivo(self, caminho_entrada: str, caminho_saida: str):
+        # Proteção de dados em repouso: lê o arquivo original e salva uma cópia totalmente ilegível sem a chave.
         with open(caminho_entrada, "r", encoding="utf-8") as f:
             conteudo = f.read()
         cifrado = self.criptografar(conteudo)
