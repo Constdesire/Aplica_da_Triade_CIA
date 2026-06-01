@@ -16,29 +16,33 @@ def separador(titulo: str):
     print(f"  {titulo}")
     print('='*60)
 
-# PILAR 3: DISPONIBILIDADE - Rate Limiting (Janela Deslizante)
-# Controla quantas requisições um usuário pode realizar em um intervalo de tempo estabelecido.
-# Este mecanismo protege a aplicação contra abusos, ataques de força bruta e 
-# ataques de Negação de Serviço (DoS/DDoS), preservando recursos para usuários legítimos.
+# PILAR 3: DISPONIBILIDADE - Mecanismo 1: Rate Limiting (Janela Deslizante)
+# Limita a taxa de acesso de um usuário para evitar sobrecarga do sistema.
+# Isso impede ataques de Negação de Serviço (DoS/DDoS) e força bruta, 
+# garantindo que o servidor permaneça disponível para usuários legítimos.
 class RateLimiter:
     def __init__(self, max_requisicoes: int = 5, janela_segundos: int = 10):
         self.max_requisicoes = max_requisicoes
         self.janela_segundos = janela_segundos
         self.historico: dict = defaultdict(list)
-        # O uso do Lock garante que o contador seja thread-safe, prevenindo 
-        # condições de corrida (race conditions) em requisições simultâneas.
+        
+        # O uso do 'Lock' bloqueia temporariamente a execução para outras threads,
+        # garantindo que a verificação seja 'thread-safe' e evitando Race Conditions
+        # (condições de corrida) onde milhares de requisições passam simultaneamente.
         self._lock = threading.Lock()
 
     def verificar(self, usuario: str) -> tuple:
         agora = time.time()
         with self._lock:
-            # Algoritmo Sliding Window: filtra apenas os timestamps que ainda estão dentro da janela de tempo atual
+            # Algoritmo de Janela Deslizante (Sliding Window): 
+            # Remove do histórico as requisições que já expiraram (ficaram para trás no tempo).
             self.historico[usuario] = [
                 t for t in self.historico[usuario]
                 if agora - t < self.janela_segundos
             ]
             contagem = len(self.historico[usuario])
             
+            # Se o limite foi atingido, nega o acesso (fail-fast) para proteger a infraestrutura.
             if contagem >= self.max_requisicoes:
                 mais_antigo = self.historico[usuario][0]
                 espera = self.janela_segundos - (agora - mais_antigo)
@@ -49,9 +53,9 @@ class RateLimiter:
             restantes = self.max_requisicoes - contagem - 1
             return True, f"OK - {restantes} requisicoes restantes na janela"
 
-# PILAR 3: DISPONIBILIDADE - Retry Automático com Backoff Exponencial
-# Implementado como um decorator Python, este mecanismo reexecuta automaticamente 
-# operações que falham por indisponibilidade temporária (como queda rápida de rede ou API).
+# PILAR 3: DISPONIBILIDADE - Mecanismo 2: Retry Automático com Backoff Exponencial
+# Usado para lidar com falhas transitórias de rede ou APIs instáveis.
+# O 'decorator' injeta a resiliência direto na função sem precisar alterar a lógica dela.
 def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_exponencial: bool = True):
     def decorator(func):
         @functools.wraps(func)
@@ -63,8 +67,9 @@ def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_
                 except Exception as e:
                     ultima_excecao = e
                     if tentativa < max_tentativas:
-                        # Backoff exponencial: o tempo de espera dobra a cada tentativa frustrada.
-                        # Isso evita sobrecarregar um serviço que já está lutando para se recuperar.
+                        # Backoff Exponencial: O tempo de espera aumenta exponencialmente a cada erro (1s -> 2s -> 4s).
+                        # Isso dá tempo para o servidor problemático "respirar" e se recuperar, 
+                        # em vez de bombardeá-lo com novas requisições imediatas.
                         espera = espera_base * (2 ** (tentativa - 1)) if backoff_exponencial else espera_base
                         print(f"  [DISP] Tentativa {tentativa} falhou: {e}. Aguardando {espera:.1f}s...")
                         time.sleep(espera)
@@ -74,9 +79,9 @@ def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_
         return wrapper
     return decorator
 
-# PILAR 3: DISPONIBILIDADE - Backup Automático com Timestamp
-# Garante a recuperação de dados e continuidade de negócio (BCP/DRP) em caso de falhas críticas, 
-# exclusões acidentais ou ataques destrutivos (ex: Ransomware).
+# PILAR 3: DISPONIBILIDADE - Mecanismo 3: Backup Automático e Restauração
+# Ponto crítico dos planos de Disaster Recovery (DRP) e Continuidade de Negócios (BCP).
+# Garante que os dados voltem a ficar disponíveis após exclusões acidentais ou ataques destrutivos (Ransomware).
 class GerenciadorBackup:
     def __init__(self, diretorio_backup: str = "backups"):
         self.diretorio_backup = Path(diretorio_backup)
@@ -87,7 +92,8 @@ class GerenciadorBackup:
         if not origem.exists():
             raise FileNotFoundError(f"Arquivo nao encontrado: {arquivo_origem}")
         
-        # Embutindo timestamp no nome do arquivo para preservar histórico de versões
+        # O Timestamp garante que backups anteriores não sejam sobrescritos, 
+        # criando um histórico seguro de versionamento dos dados.
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_backup = f"{origem.stem}_{timestamp}{origem.suffix}"
         destino = self.diretorio_backup / nome_backup
@@ -102,6 +108,7 @@ class GerenciadorBackup:
         return [str(b) for b in backups]
 
     def restaurar_ultimo_backup(self, nome_arquivo: str, destino: str = None) -> str:
+        # Mecanismo de reversão (Rollback) que puxa a última versão íntegra conhecida do sistema.
         backups = self.listar_backups(nome_arquivo)
         if not backups:
             raise FileNotFoundError(f"Nenhum backup encontrado para: {nome_arquivo}")
