@@ -16,19 +16,31 @@ def separador(titulo: str):
 
 class GerenciadorIntegridade:
     def __init__(self, chave_hmac: str = "chave_hmac_secreta_2024"):
+        # A chave secreta é essencial para o HMAC. Apenas quem possui esta chave
+        # pode gerar um hash válido, garantindo a autenticidade da origem.
         self.chave_hmac = chave_hmac.encode("utf-8")
 
+    # PILAR 2: INTEGRIDADE - SHA-256 Simples
     def calcular_sha256(self, dados: str) -> str:
+        # Utiliza o algoritmo SHA-256 para gerar um "digest" único de 256 bits.
+        # Devido ao efeito avalanche, qualquer alteração mínima nos dados de entrada
+        # resultará em um hash completamente diferente na saída.
         return hashlib.sha256(dados.encode("utf-8")).hexdigest()
 
     def calcular_sha256_arquivo(self, caminho: str) -> str:
         sha256 = hashlib.sha256()
+        # Lê o arquivo em blocos de 64KB (65536 bytes) em vez de carregar tudo na memória.
+        # Excelente prática para lidar com arquivos grandes sem travar o sistema.
         with open(caminho, "rb") as f:
             while bloco := f.read(65536):
                 sha256.update(bloco)
         return sha256.hexdigest()
 
+    # PILAR 2: INTEGRIDADE - Autenticação de Mensagens com HMAC-SHA256
     def calcular_hmac(self, dados: str) -> str:
+        # Combina o algoritmo SHA-256 com a chave secreta.
+        # Isso protege contra ataques onde um invasor forja os dados e recalcula o hash,
+        # pois o invasor não possui a chave para gerar o MAC correto.
         return hmac.new(
             self.chave_hmac,
             dados.encode("utf-8"),
@@ -42,9 +54,16 @@ class GerenciadorIntegridade:
             hash_atual = self.calcular_hmac(dados)
         else:
             raise ValueError(f"Metodo desconhecido: {metodo}")
+        
+        # Uso crítico do hmac.compare_digest():
+        # Realiza a comparação de strings em "tempo constante".
+        # Isso elimina vulnerabilidades de 'timing attack' (ataques que medem o tempo de 
+        # comparação caractere por caractere para tentar deduzir o hash/chave correta).
         return hmac.compare_digest(hash_atual, hash_esperado)
 
     def salvar_manifesto(self, arquivos: list, caminho_manifesto: str):
+        # Cria um arquivo JSON com os hashes originais de um grupo de arquivos.
+        # Serve como uma "foto" do estado íntegro dos arquivos no momento da geração.
         manifesto = {
             "gerado_em": datetime.datetime.now().isoformat(),
             "arquivos": {}
@@ -58,6 +77,8 @@ class GerenciadorIntegridade:
         return manifesto
 
     def verificar_manifesto(self, caminho_manifesto: str) -> dict:
+        # Compara os hashes atuais dos arquivos com os hashes salvos no manifesto.
+        # Ideal para detectar arquivos corrompidos ou modificados por malwares/invasores.
         with open(caminho_manifesto, "r", encoding="utf-8") as f:
             manifesto = json.load(f)
         resultados = {}
