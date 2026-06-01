@@ -16,30 +16,42 @@ def separador(titulo: str):
     print(f"  {titulo}")
     print('='*60)
 
+# PILAR 3: DISPONIBILIDADE - Rate Limiting (Janela Deslizante)
+# Controla quantas requisições um usuário pode realizar em um intervalo de tempo estabelecido.
+# Este mecanismo protege a aplicação contra abusos, ataques de força bruta e 
+# ataques de Negação de Serviço (DoS/DDoS), preservando recursos para usuários legítimos.
 class RateLimiter:
     def __init__(self, max_requisicoes: int = 5, janela_segundos: int = 10):
         self.max_requisicoes = max_requisicoes
         self.janela_segundos = janela_segundos
         self.historico: dict = defaultdict(list)
+        # O uso do Lock garante que o contador seja thread-safe, prevenindo 
+        # condições de corrida (race conditions) em requisições simultâneas.
         self._lock = threading.Lock()
 
     def verificar(self, usuario: str) -> tuple:
         agora = time.time()
         with self._lock:
+            # Algoritmo Sliding Window: filtra apenas os timestamps que ainda estão dentro da janela de tempo atual
             self.historico[usuario] = [
                 t for t in self.historico[usuario]
                 if agora - t < self.janela_segundos
             ]
             contagem = len(self.historico[usuario])
+            
             if contagem >= self.max_requisicoes:
                 mais_antigo = self.historico[usuario][0]
                 espera = self.janela_segundos - (agora - mais_antigo)
                 return False, (f"Rate limit atingido: {contagem}/{self.max_requisicoes} "
                                f"req. Aguarde {espera:.1f}s")
+            
             self.historico[usuario].append(agora)
             restantes = self.max_requisicoes - contagem - 1
             return True, f"OK - {restantes} requisicoes restantes na janela"
 
+# PILAR 3: DISPONIBILIDADE - Retry Automático com Backoff Exponencial
+# Implementado como um decorator Python, este mecanismo reexecuta automaticamente 
+# operações que falham por indisponibilidade temporária (como queda rápida de rede ou API).
 def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_exponencial: bool = True):
     def decorator(func):
         @functools.wraps(func)
@@ -51,6 +63,8 @@ def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_
                 except Exception as e:
                     ultima_excecao = e
                     if tentativa < max_tentativas:
+                        # Backoff exponencial: o tempo de espera dobra a cada tentativa frustrada.
+                        # Isso evita sobrecarregar um serviço que já está lutando para se recuperar.
                         espera = espera_base * (2 ** (tentativa - 1)) if backoff_exponencial else espera_base
                         print(f"  [DISP] Tentativa {tentativa} falhou: {e}. Aguardando {espera:.1f}s...")
                         time.sleep(espera)
@@ -60,6 +74,9 @@ def retry_automatico(max_tentativas: int = 3, espera_base: float = 1.0, backoff_
         return wrapper
     return decorator
 
+# PILAR 3: DISPONIBILIDADE - Backup Automático com Timestamp
+# Garante a recuperação de dados e continuidade de negócio (BCP/DRP) em caso de falhas críticas, 
+# exclusões acidentais ou ataques destrutivos (ex: Ransomware).
 class GerenciadorBackup:
     def __init__(self, diretorio_backup: str = "backups"):
         self.diretorio_backup = Path(diretorio_backup)
@@ -69,9 +86,12 @@ class GerenciadorBackup:
         origem = Path(arquivo_origem)
         if not origem.exists():
             raise FileNotFoundError(f"Arquivo nao encontrado: {arquivo_origem}")
+        
+        # Embutindo timestamp no nome do arquivo para preservar histórico de versões
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_backup = f"{origem.stem}_{timestamp}{origem.suffix}"
         destino = self.diretorio_backup / nome_backup
+        
         shutil.copy2(str(origem), str(destino))
         print(f"  [DISP] Backup criado: {destino}")
         return str(destino)
