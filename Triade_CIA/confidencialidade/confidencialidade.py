@@ -18,6 +18,8 @@ def separador(titulo: str):
 
 class GerenciadorConfidencialidade:
     def __init__(self, arquivo_chave: str = "chave_secreta.key"):
+        # A chave de criptografia nunca deve ficar hardcoded (fixa) no código-fonte.
+        # Por isso, gerenciamos a chave em um arquivo externo separado.
         self.arquivo_chave = arquivo_chave
         self.cipher = None
         self._carregar_ou_gerar_chave()
@@ -28,34 +30,40 @@ class GerenciadorConfidencialidade:
                 chave = f.read()
             print(f" Chave carregada de: {self.arquivo_chave}")
         else:
-            # PILAR 1: CONFIDENCIALIDADE
-            # Gera chave criptograficamente segura (256 bits). 
-            # A biblioteca cryptography utiliza os.urandom() do sistema operacional como fonte de entropia.
+            # PILAR 1: CONFIDENCIALIDADE - Geração Segura de Chave
+            # Gera uma chave criptograficamente segura de 256 bits (32 bytes em base64). 
+            # A biblioteca cryptography utiliza os.urandom(), coletando entropia do sistema 
+            # operacional, o que impede ataques de força bruta previsíveis.
             chave = Fernet.generate_key()
             with open(self.arquivo_chave, "wb") as f:
                 f.write(chave)
             print(f" Nova chave gerada e salva em: {self.arquivo_chave}")
+        
+        # Inicializa o motor criptográfico simétrico com a chave carregada/gerada.
         self.cipher = Fernet(chave)
 
     def criptografar(self, dados: str) -> bytes:
+        # A criptografia atua sobre bytes, não strings puras.
         dados_bytes = dados.encode("utf-8")
         
-        # Cifra os dados sensíveis utilizando o esquema Fernet.
-        # O Fernet emprega internamente AES-128 no modo CBC (Cipher Block Chaining), 
-        # tornando a criptografia resistente a ataques de análise de padrões.
-        # Também embute automaticamente um HMAC-SHA256 para garantir que o token não seja adulterado.
+        # PILAR 1: CONFIDENCIALIDADE - Cifragem AES-128-CBC
+        # O Fernet emprega internamente o padrão AES-128 no modo CBC (Cipher Block Chaining).
+        # No modo CBC, cada bloco de dados é misturado (XOR) com o bloco anterior antes de ser cifrado,
+        # ocultando padrões nos dados originais. O Fernet também inclui um timestamp e um HMAC.
         dados_cifrados = self.cipher.encrypt(dados_bytes)
         return dados_cifrados
 
     def descriptografar(self, dados_cifrados: bytes) -> str:
-        # Descriptografa os dados e verifica o token.
-        # A operação falhará automaticamente (lançando exceção) se a chave for inválida
-        # ou se o token (HMAC) tiver sido modificado após a cifragem.
+        # Processo de reversão da cifra.
+        # O Fernet verifica automaticamente a assinatura HMAC antes de tentar descriptografar.
+        # Se o dado foi corrompido ou adulterado, a descriptografia é abortada por segurança.
         dados_bytes = self.cipher.decrypt(dados_cifrados)
         return dados_bytes.decode("utf-8")
 
     def criptografar_arquivo(self, caminho_entrada: str, caminho_saida: str):
-        # Proteção de dados em repouso: lê o arquivo original e salva uma cópia totalmente ilegível sem a chave.
+        # Proteção de Dados em Repouso (Data at Rest):
+        # Lê o conteúdo de um arquivo em texto claro e grava uma cópia ilegível (.enc).
+        # Sem a chave_secreta.key, o invasor vê apenas bytes embaralhados.
         with open(caminho_entrada, "r", encoding="utf-8") as f:
             conteudo = f.read()
         cifrado = self.criptografar(conteudo)
@@ -64,6 +72,7 @@ class GerenciadorConfidencialidade:
         print(f" Arquivo normal '{caminho_entrada}' Arquivo cifrado -> '{caminho_saida}'")
 
     def descriptografar_arquivo(self, caminho_cifrado: str) -> str:
+        # Lê os bytes cifrados do disco e aplica o processo de recuperação para memória.
         with open(caminho_cifrado, "rb") as f:
             cifrado = f.read()
         return self.descriptografar(cifrado)
